@@ -2,10 +2,11 @@ package main
 
 import (
 	"fmt"
-	"image/jpeg"
 	"log"
 	"net/http"
 	"strconv"
+
+	"golang.org/x/image/bmp"
 )
 
 func main() {
@@ -70,14 +71,14 @@ func main() {
 			return
 		}
 
-		// Set response headers
-		w.Header().Set("Content-Type", "image/jpeg")
+		// Set response headers for bitmap
+		w.Header().Set("Content-Type", "image/bmp")
 		w.Header().Set("Cache-Control", "no-cache")
 
-		// Encode and send the processed image as JPEG
-		if err := jpeg.Encode(w, processedImage, &jpeg.Options{Quality: 90}); err != nil {
-			log.Printf("Error encoding image: %v", err)
-			http.Error(w, "Error encoding image", http.StatusInternalServerError)
+		// Encode and send the image as BMP using the official package
+		if err := bmp.Encode(w, processedImage); err != nil {
+			log.Printf("Error encoding BMP: %v", err)
+			http.Error(w, "Error encoding BMP", http.StatusInternalServerError)
 			return
 		}
 	})

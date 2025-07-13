@@ -19,8 +19,8 @@ func NewImageProcessor() *ImageProcessor {
 }
 
 // getDefaultGrayscalePalette returns a 4-color grayscale palette
-func (ip *ImageProcessor) getDefaultGrayscalePalette() []color.Color {
-	return []color.Color{
+func (ip *ImageProcessor) getDefaultGrayscalePalette() color.Palette {
+	return color.Palette{
 		color.RGBA{0, 0, 0, 255},       // Black
 		color.RGBA{85, 85, 85, 255},    // Dark gray
 		color.RGBA{170, 170, 170, 255}, // Light gray
@@ -28,14 +28,14 @@ func (ip *ImageProcessor) getDefaultGrayscalePalette() []color.Color {
 	}
 }
 
-// findClosestColor finds the closest color in the palette to the given color
-func (ip *ImageProcessor) findClosestColor(c color.Color, palette []color.Color) color.Color {
+// findClosestColorIndex finds the index of the closest color in the palette
+func (ip *ImageProcessor) findClosestColorIndex(c color.Color, palette color.Palette) uint8 {
 	r1, g1, b1, _ := c.RGBA()
 
-	var closestColor color.Color = palette[0]
+	closestIndex := uint8(0)
 	minDistance := float64(^uint(0) >> 1) // Max float64
 
-	for _, paletteColor := range palette {
+	for i, paletteColor := range palette {
 		r2, g2, b2, _ := paletteColor.RGBA()
 
 		// Calculate Euclidean distance in RGB space
@@ -46,25 +46,30 @@ func (ip *ImageProcessor) findClosestColor(c color.Color, palette []color.Color)
 
 		if distance < minDistance {
 			minDistance = distance
-			closestColor = paletteColor
+			closestIndex = uint8(i)
 		}
 	}
 
-	return closestColor
+	return closestIndex
 }
 
-// ApplyDithering applies Floyd-Steinberg dithering to an image using a custom palette
-func (ip *ImageProcessor) ApplyDithering(img image.Image, palette []color.Color) (image.Image, error) {
+// ApplyDithering applies Floyd-Steinberg dithering to an image using the fixed palette
+// and returns a paletted image (indexed color bitmap)
+func (ip *ImageProcessor) ApplyDithering(img image.Image, palette color.Palette) (*image.Paletted, error) {
 	return ip.applyFloydSteinbergDithering(img, palette), nil
 }
 
-// applyFloydSteinbergDithering implements custom Floyd-Steinberg dithering for our 4-color palette
-func (ip *ImageProcessor) applyFloydSteinbergDithering(img image.Image, palette []color.Color) image.Image {
+// applyFloydSteinbergDithering implements Floyd-Steinberg dithering with a fixed palette
+// and returns a paletted image
+func (ip *ImageProcessor) applyFloydSteinbergDithering(img image.Image, palette color.Palette) *image.Paletted {
 	bounds := img.Bounds()
 	width := bounds.Dx()
 	height := bounds.Dy()
 
-	// Create a copy of the image as RGBA for manipulation
+	// Create a paletted image with the fixed palette
+	palettedImg := image.NewPaletted(image.Rect(0, 0, width, height), palette)
+
+	// Create a working copy for error distribution
 	rgbaImg := image.NewRGBA(bounds)
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
@@ -76,7 +81,15 @@ func (ip *ImageProcessor) applyFloydSteinbergDithering(img image.Image, palette 
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
 			oldPixel := rgbaImg.RGBAAt(x+bounds.Min.X, y+bounds.Min.Y)
-			newPixel := ip.findClosestColor(oldPixel, palette)
+
+			// Find the closest color index in our fixed palette
+			colorIndex := ip.findClosestColorIndex(oldPixel, palette)
+			newPixel := palette[colorIndex]
+
+			// Set the pixel in the paletted image using the color index
+			palettedImg.SetColorIndex(x, y, colorIndex)
+
+			// Update the working image for error distribution
 			rgbaImg.Set(x+bounds.Min.X, y+bounds.Min.Y, newPixel)
 
 			// Calculate error
@@ -103,7 +116,7 @@ func (ip *ImageProcessor) applyFloydSteinbergDithering(img image.Image, palette 
 		}
 	}
 
-	return rgbaImg
+	return palettedImg
 }
 
 // addError adds error to a pixel during Floyd-Steinberg dithering
@@ -146,9 +159,10 @@ func (ip *ImageProcessor) ProcessImage(imageURL string, maxWidth, maxHeight uint
 	// Resize the image to fit within the specified dimensions
 	resizedImg := ip.resizeImage(img, maxWidth, maxHeight)
 
-	// Apply dithering with default grayscale palette if enabled
+	// Apply dithering with fixed grayscale palette if enabled
 	if enableDither {
-		ditheredImg, err := ip.ApplyDithering(resizedImg, ip.getDefaultGrayscalePalette())
+		palette := ip.getDefaultGrayscalePalette()
+		ditheredImg, err := ip.ApplyDithering(resizedImg, palette)
 		if err != nil {
 			return nil, fmt.Errorf("failed to apply dithering: %w", err)
 		}
