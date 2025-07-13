@@ -35,7 +35,7 @@ GET /process?url=<image_url>&width=<width>&height=<height>
 
 **Example:**
 ```bash
-curl "http://localhost:8080/process?url=https://example.com/image.jpg&width=800&height=600" -o resized_image.jpg
+curl "http://localhost:8080/process?url=https://picsum.photos/500/500&width=400&height=100" -o resized_image.jpg
 ```
 
 #### Health Check

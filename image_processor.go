@@ -61,35 +61,40 @@ func (ip *ImageProcessor) downloadImage(imageURL string) (image.Image, error) {
 	return img, nil
 }
 
-// resizeImage resizes an image to fit within the specified dimensions while maintaining aspect ratio
+// resizeImage resizes an image to fit the specified dimensions exactly while maintaining aspect ratio
+// by scaling to fill the target dimensions and cropping any excess
 func (ip *ImageProcessor) resizeImage(img image.Image, maxWidth, maxHeight uint) image.Image {
 	bounds := img.Bounds()
 	originalWidth := uint(bounds.Dx())
 	originalHeight := uint(bounds.Dy())
 
-	// Calculate the scaling factor to fit within the specified dimensions
+	// Calculate the scaling factor to fill the specified dimensions
 	scaleX := float64(maxWidth) / float64(originalWidth)
 	scaleY := float64(maxHeight) / float64(originalHeight)
 
-	// Use the smaller scale to maintain aspect ratio
+	// Use the larger scale to fill the target dimensions (may require cropping)
 	scale := scaleX
-	if scaleY < scaleX {
+	if scaleY > scaleX {
 		scale = scaleY
 	}
 
-	// Calculate new dimensions
-	newWidth := uint(float64(originalWidth) * scale)
-	newHeight := uint(float64(originalHeight) * scale)
+	// Calculate scaled dimensions (may be larger than target)
+	scaledWidth := float64(originalWidth) * scale
+	scaledHeight := float64(originalHeight) * scale
 
-	// Create a new image with the calculated dimensions
-	resizedImg := image.NewRGBA(image.Rect(0, 0, int(newWidth), int(newHeight)))
+	// Calculate offset to center the scaled image within the target dimensions
+	offsetX := (scaledWidth - float64(maxWidth)) / 2
+	offsetY := (scaledHeight - float64(maxHeight)) / 2
 
-	// Perform nearest neighbor interpolation
-	for y := 0; y < int(newHeight); y++ {
-		for x := 0; x < int(newWidth); x++ {
-			// Map the destination coordinates to source coordinates
-			srcX := int(float64(x) / scale)
-			srcY := int(float64(y) / scale)
+	// Create a new image with the exact target dimensions
+	resizedImg := image.NewRGBA(image.Rect(0, 0, int(maxWidth), int(maxHeight)))
+
+	// Perform nearest neighbor interpolation with cropping
+	for y := 0; y < int(maxHeight); y++ {
+		for x := 0; x < int(maxWidth); x++ {
+			// Map the destination coordinates to source coordinates, accounting for centering offset
+			srcX := int((float64(x) + offsetX) / scale)
+			srcY := int((float64(y) + offsetY) / scale)
 
 			// Ensure we don't go out of bounds
 			if srcX >= int(originalWidth) {
@@ -97,6 +102,12 @@ func (ip *ImageProcessor) resizeImage(img image.Image, maxWidth, maxHeight uint)
 			}
 			if srcY >= int(originalHeight) {
 				srcY = int(originalHeight) - 1
+			}
+			if srcX < 0 {
+				srcX = 0
+			}
+			if srcY < 0 {
+				srcY = 0
 			}
 
 			// Get the pixel from the source image and set it in the destination
