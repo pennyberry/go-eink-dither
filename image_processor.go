@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"image"
+	"image/color"
 	"image/jpeg"
 	"io"
 	"net/http"
@@ -17,9 +18,125 @@ func NewImageProcessor() *ImageProcessor {
 	return &ImageProcessor{}
 }
 
+// getDefaultGrayscalePalette returns a 4-color grayscale palette
+func (ip *ImageProcessor) getDefaultGrayscalePalette() []color.Color {
+	return []color.Color{
+		color.RGBA{0, 0, 0, 255},       // Black
+		color.RGBA{85, 85, 85, 255},    // Dark gray
+		color.RGBA{170, 170, 170, 255}, // Light gray
+		color.RGBA{255, 255, 255, 255}, // White
+	}
+}
+
+// findClosestColor finds the closest color in the palette to the given color
+func (ip *ImageProcessor) findClosestColor(c color.Color, palette []color.Color) color.Color {
+	r1, g1, b1, _ := c.RGBA()
+
+	var closestColor color.Color = palette[0]
+	minDistance := float64(^uint(0) >> 1) // Max float64
+
+	for _, paletteColor := range palette {
+		r2, g2, b2, _ := paletteColor.RGBA()
+
+		// Calculate Euclidean distance in RGB space
+		dr := float64(r1) - float64(r2)
+		dg := float64(g1) - float64(g2)
+		db := float64(b1) - float64(b2)
+		distance := dr*dr + dg*dg + db*db
+
+		if distance < minDistance {
+			minDistance = distance
+			closestColor = paletteColor
+		}
+	}
+
+	return closestColor
+}
+
+// ApplyDithering applies Floyd-Steinberg dithering to an image using a custom palette
+func (ip *ImageProcessor) ApplyDithering(img image.Image, palette []color.Color) (image.Image, error) {
+	return ip.applyFloydSteinbergDithering(img, palette), nil
+}
+
+// applyFloydSteinbergDithering implements custom Floyd-Steinberg dithering for our 4-color palette
+func (ip *ImageProcessor) applyFloydSteinbergDithering(img image.Image, palette []color.Color) image.Image {
+	bounds := img.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+
+	// Create a copy of the image as RGBA for manipulation
+	rgbaImg := image.NewRGBA(bounds)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			rgbaImg.Set(x, y, img.At(x, y))
+		}
+	}
+
+	// Apply Floyd-Steinberg dithering
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			oldPixel := rgbaImg.RGBAAt(x+bounds.Min.X, y+bounds.Min.Y)
+			newPixel := ip.findClosestColor(oldPixel, palette)
+			rgbaImg.Set(x+bounds.Min.X, y+bounds.Min.Y, newPixel)
+
+			// Calculate error
+			oldR, oldG, oldB, _ := oldPixel.RGBA()
+			newR, newG, newB, _ := newPixel.RGBA()
+
+			errR := int(oldR>>8) - int(newR>>8)
+			errG := int(oldG>>8) - int(newG>>8)
+			errB := int(oldB>>8) - int(newB>>8)
+
+			// Distribute error to neighboring pixels
+			if x+1 < width {
+				ip.addError(rgbaImg, x+1+bounds.Min.X, y+bounds.Min.Y, errR, errG, errB, 7.0/16.0)
+			}
+			if y+1 < height {
+				if x > 0 {
+					ip.addError(rgbaImg, x-1+bounds.Min.X, y+1+bounds.Min.Y, errR, errG, errB, 3.0/16.0)
+				}
+				ip.addError(rgbaImg, x+bounds.Min.X, y+1+bounds.Min.Y, errR, errG, errB, 5.0/16.0)
+				if x+1 < width {
+					ip.addError(rgbaImg, x+1+bounds.Min.X, y+1+bounds.Min.Y, errR, errG, errB, 1.0/16.0)
+				}
+			}
+		}
+	}
+
+	return rgbaImg
+}
+
+// addError adds error to a pixel during Floyd-Steinberg dithering
+func (ip *ImageProcessor) addError(img *image.RGBA, x, y int, errR, errG, errB int, factor float64) {
+	pixel := img.RGBAAt(x, y)
+
+	newR := int(pixel.R) + int(float64(errR)*factor)
+	newG := int(pixel.G) + int(float64(errG)*factor)
+	newB := int(pixel.B) + int(float64(errB)*factor)
+
+	// Clamp values to [0, 255]
+	if newR < 0 {
+		newR = 0
+	} else if newR > 255 {
+		newR = 255
+	}
+	if newG < 0 {
+		newG = 0
+	} else if newG > 255 {
+		newG = 255
+	}
+	if newB < 0 {
+		newB = 0
+	} else if newB > 255 {
+		newB = 255
+	}
+
+	img.Set(x, y, color.RGBA{uint8(newR), uint8(newG), uint8(newB), pixel.A})
+}
+
 // ProcessImage downloads an image from URL and resizes it to fit within the specified dimensions
-// while maintaining aspect ratio
-func (ip *ImageProcessor) ProcessImage(imageURL string, maxWidth, maxHeight uint) (image.Image, error) {
+// while maintaining aspect ratio, then optionally applies Floyd-Steinberg dithering
+func (ip *ImageProcessor) ProcessImage(imageURL string, maxWidth, maxHeight uint, enableDither bool) (image.Image, error) {
 	// Download the image
 	img, err := ip.downloadImage(imageURL)
 	if err != nil {
@@ -28,6 +145,15 @@ func (ip *ImageProcessor) ProcessImage(imageURL string, maxWidth, maxHeight uint
 
 	// Resize the image to fit within the specified dimensions
 	resizedImg := ip.resizeImage(img, maxWidth, maxHeight)
+
+	// Apply dithering with default grayscale palette if enabled
+	if enableDither {
+		ditheredImg, err := ip.ApplyDithering(resizedImg, ip.getDefaultGrayscalePalette())
+		if err != nil {
+			return nil, fmt.Errorf("failed to apply dithering: %w", err)
+		}
+		return ditheredImg, nil
+	}
 
 	return resizedImg, nil
 }

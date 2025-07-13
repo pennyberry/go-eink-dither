@@ -18,6 +18,7 @@ func main() {
 		imageURL := r.URL.Query().Get("url")
 		widthStr := r.URL.Query().Get("width")
 		heightStr := r.URL.Query().Get("height")
+		ditherStr := r.URL.Query().Get("dither")
 
 		// Validate required parameters
 		if imageURL == "" {
@@ -45,6 +46,16 @@ func main() {
 			return
 		}
 
+		// Parse dither parameter (optional, defaults to true)
+		enableDither := true
+		if ditherStr != "" {
+			enableDither, err = strconv.ParseBool(ditherStr)
+			if err != nil {
+				http.Error(w, "Invalid dither parameter: must be true or false", http.StatusBadRequest)
+				return
+			}
+		}
+
 		// Validate dimensions
 		if width == 0 || height == 0 {
 			http.Error(w, "Width and height must be greater than 0", http.StatusBadRequest)
@@ -52,7 +63,7 @@ func main() {
 		}
 
 		// Process the image
-		processedImage, err := processor.ProcessImage(imageURL, uint(width), uint(height))
+		processedImage, err := processor.ProcessImage(imageURL, uint(width), uint(height), enableDither)
 		if err != nil {
 			log.Printf("Error processing image: %v", err)
 			http.Error(w, fmt.Sprintf("Error processing image: %v", err), http.StatusInternalServerError)
@@ -80,8 +91,6 @@ func main() {
 	// Start the server
 	port := "8080"
 	fmt.Printf("Server starting on port %s\n", port)
-	fmt.Printf("Usage: http://localhost:%s/process?url=<image_url>&width=<width>&height=<height>\n", port)
-	fmt.Printf("Example: http://localhost:%s/process?url=https://example.com/image.jpg&width=800&height=600\n", port)
 
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal("Server failed to start:", err)
