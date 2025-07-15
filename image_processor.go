@@ -147,9 +147,90 @@ func (ip *ImageProcessor) addError(img *image.RGBA, x, y int, errR, errG, errB i
 	img.Set(x, y, color.RGBA{uint8(newR), uint8(newG), uint8(newB), pixel.A})
 }
 
+// convertToGrayscale converts an image to grayscale using the luminance formula
+func (ip *ImageProcessor) convertToGrayscale(img image.Image) *image.Gray {
+	bounds := img.Bounds()
+	grayImg := image.NewGray(bounds)
+
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			originalColor := img.At(x, y)
+			r, g, b, _ := originalColor.RGBA()
+
+			// Convert to 8-bit values
+			r8 := uint8(r >> 8)
+			g8 := uint8(g >> 8)
+			b8 := uint8(b >> 8)
+
+			// Calculate luminance using the standard formula: 0.299*R + 0.587*G + 0.114*B
+			gray := uint8(0.299*float64(r8) + 0.587*float64(g8) + 0.114*float64(b8))
+
+			grayImg.SetGray(x, y, color.Gray{Y: gray})
+		}
+	}
+
+	return grayImg
+}
+
+// applyHistogramNormalization applies histogram normalization to enhance contrast
+func (ip *ImageProcessor) applyHistogramNormalization(img *image.Gray) *image.Gray {
+	bounds := img.Bounds()
+
+	// Create histogram
+	histogram := make([]int, 256)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			gray := img.GrayAt(x, y)
+			histogram[gray.Y]++
+		}
+	}
+
+	// Find min and max non-zero values
+	minVal := 255
+	maxVal := 0
+	for i := 0; i < 256; i++ {
+		if histogram[i] > 0 {
+			if i < minVal {
+				minVal = i
+			}
+			if i > maxVal {
+				maxVal = i
+			}
+		}
+	}
+
+	// If the image is already using the full range, return as-is
+	if minVal == 0 && maxVal == 255 {
+		return img
+	}
+
+	// Create normalized image
+	normalizedImg := image.NewGray(bounds)
+
+	// Apply linear stretch normalization
+	range_ := float64(maxVal - minVal)
+	if range_ == 0 {
+		// Handle edge case where all pixels have the same value
+		return img
+	}
+
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			gray := img.GrayAt(x, y)
+
+			// Normalize to 0-255 range
+			normalizedValue := uint8((float64(gray.Y-uint8(minVal)) / range_) * 255.0)
+			normalizedImg.SetGray(x, y, color.Gray{Y: normalizedValue})
+		}
+	}
+
+	return normalizedImg
+}
+
 // ProcessImage downloads an image from URL and resizes it to fit within the specified dimensions
-// while maintaining aspect ratio, then optionally applies Floyd-Steinberg dithering
-func (ip *ImageProcessor) ProcessImage(imageURL string, maxWidth, maxHeight uint, enableDither bool) (image.Image, error) {
+// while maintaining aspect ratio, then converts to grayscale, optionally applies histogram normalization,
+// and optionally applies Floyd-Steinberg dithering
+func (ip *ImageProcessor) ProcessImage(imageURL string, maxWidth, maxHeight uint, enableDither bool, enableNormalize bool) (image.Image, error) {
 	// Download the image
 	img, err := ip.downloadImage(imageURL)
 	if err != nil {
@@ -159,17 +240,26 @@ func (ip *ImageProcessor) ProcessImage(imageURL string, maxWidth, maxHeight uint
 	// Resize the image to fit within the specified dimensions
 	resizedImg := ip.resizeImage(img, maxWidth, maxHeight)
 
+	// Convert to grayscale
+	grayscaleImg := ip.convertToGrayscale(resizedImg)
+
+	// Apply histogram normalization if enabled
+	var processedImg image.Image = grayscaleImg
+	if enableNormalize {
+		processedImg = ip.applyHistogramNormalization(grayscaleImg)
+	}
+
 	// Apply dithering with fixed grayscale palette if enabled
 	if enableDither {
 		palette := ip.getDefaultGrayscalePalette()
-		ditheredImg, err := ip.ApplyDithering(resizedImg, palette)
+		ditheredImg, err := ip.ApplyDithering(processedImg, palette)
 		if err != nil {
 			return nil, fmt.Errorf("failed to apply dithering: %w", err)
 		}
 		return ditheredImg, nil
 	}
 
-	return resizedImg, nil
+	return processedImg, nil
 }
 
 // downloadImage downloads an image from the given URL

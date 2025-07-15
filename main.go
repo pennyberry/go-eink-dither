@@ -20,6 +20,7 @@ func main() {
 		widthStr := r.URL.Query().Get("width")
 		heightStr := r.URL.Query().Get("height")
 		ditherStr := r.URL.Query().Get("dither")
+		normalizeStr := r.URL.Query().Get("normalize")
 
 		// Validate required parameters
 		if imageURL == "" {
@@ -57,6 +58,16 @@ func main() {
 			}
 		}
 
+		// Parse normalize parameter (optional, defaults to true)
+		enableNormalize := true
+		if normalizeStr != "" {
+			enableNormalize, err = strconv.ParseBool(normalizeStr)
+			if err != nil {
+				http.Error(w, "Invalid normalize parameter: must be true or false", http.StatusBadRequest)
+				return
+			}
+		}
+
 		// Validate dimensions
 		if width == 0 || height == 0 {
 			http.Error(w, "Width and height must be greater than 0", http.StatusBadRequest)
@@ -64,7 +75,7 @@ func main() {
 		}
 
 		// Process the image
-		processedImage, err := processor.ProcessImage(imageURL, uint(width), uint(height), enableDither)
+		processedImage, err := processor.ProcessImage(imageURL, uint(width), uint(height), enableDither, enableNormalize)
 		if err != nil {
 			log.Printf("Error processing image: %v", err)
 			http.Error(w, fmt.Sprintf("Error processing image: %v", err), http.StatusInternalServerError)
