@@ -1,0 +1,48 @@
+{
+    "name": "go-eink-dither",
+    "description": "A web service for processing images with dithering for e-ink displays",
+    "keywords": [
+        "golang",
+        "image-processing",
+        "dithering",
+        "eink"
+    ],
+    "website": "",
+    "repository": "",
+    "logo": "",
+    "success_url": "/health",
+    "scripts": {},
+    "env": {},
+    "formation": {
+        "web": {
+            "quantity": 1,
+            "size": "basic"
+        }
+    },
+    "addons": [],
+    "buildpacks": [],
+    "healthchecks": {
+        "web": [
+            {
+                "type": "startup",
+                "name": "web-startup",
+                "description": "web server startup check",
+                "path": "/health",
+                "attempts": 3,
+                "timeout": 5,
+                "wait": 5,
+                "initial_delay": 10
+            },
+            {
+                "type": "liveness",
+                "name": "web-liveness",
+                "description": "web server liveness check",
+                "path": "/health",
+                "attempts": 3,
+                "timeout": 5,
+                "wait": 10,
+                "initial_delay": 30
+            }
+        ]
+    }
+}
