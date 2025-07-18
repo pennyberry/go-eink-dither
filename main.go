@@ -6,10 +6,33 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/spf13/cobra"
 	"golang.org/x/image/bmp"
 )
 
+var (
+	port string
+)
+
 func main() {
+	var rootCmd = &cobra.Command{
+		Use:   "go-eink-dither",
+		Short: "A web service for processing images with dithering for e-ink displays",
+		Long: `go-eink-dither is a web service that downloads images from URLs,
+resizes them, converts to grayscale, and applies Floyd-Steinberg dithering
+optimized for e-ink displays.`,
+		Run: runServer,
+	}
+
+	rootCmd.Flags().StringVarP(&port, "port", "p", "", "Port to run the server on")
+	rootCmd.MarkFlagRequired("port")
+
+	if err := rootCmd.Execute(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func runServer(cmd *cobra.Command, args []string) {
 	// Create image processor instance
 	processor := NewImageProcessor()
 
@@ -100,8 +123,6 @@ func main() {
 		w.Write([]byte("OK"))
 	})
 
-	// Start the server
-	port := "8080"
 	fmt.Printf("Server starting on port %s\n", port)
 
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
