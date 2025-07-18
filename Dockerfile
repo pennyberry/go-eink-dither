@@ -28,12 +28,9 @@ WORKDIR /root/
 # Copy the binary from the builder stage
 COPY --from=builder /app/main .
 
-# Define port as build argument with default value for EXPOSE
-ARG PORT=8080
-
-# Expose the port the app runs on
-EXPOSE ${PORT}
+# Expose port for local development (Dokku will handle dynamic port mapping)
+EXPOSE 8080
 
 # Command to run the application with required port argument
-# To use a different port, override with: docker run <image> ./main --port <your-port>
-CMD ["./main", "--port", "8080"] 
+# Use PORT environment variable from Dokku, fallback to 8080 for local development
+CMD sh -c './main --port ${PORT:-8080}' 
