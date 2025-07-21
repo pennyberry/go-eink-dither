@@ -1,7 +1,7 @@
-LABEL dokku.proxy.port-map=http:80:8080,https:443:8080
-
 # Use the official Go image as build stage
 FROM golang:1.24-alpine AS builder
+
+LABEL dokku.proxy.port-map=http:80:8080,https:443:8080
 
 # Set the working directory inside the container
 WORKDIR /app
