@@ -34,22 +34,17 @@ optimized for e-ink displays.`,
 }
 
 func runServer(cmd *cobra.Command, args []string) {
-	// Create image processor instance
 	processor := NewImageProcessor()
 
-	// Create HTTP handler for the image processing endpoint
 	http.HandleFunc("/process", func(w http.ResponseWriter, r *http.Request) {
-		// Parse query parameters
 		imageURL := r.URL.Query().Get("url")
 		widthStr := r.URL.Query().Get("width")
 		heightStr := r.URL.Query().Get("height")
 		ditherStr := r.URL.Query().Get("dither")
 		normalizeStr := r.URL.Query().Get("normalize")
 
-		// Get ETag from request headers
 		etag := r.Header.Get("If-None-Match")
 
-		// Validate required parameters
 		if imageURL == "" {
 			http.Error(w, "Missing required parameter: url", http.StatusBadRequest)
 			return
@@ -63,7 +58,6 @@ func runServer(cmd *cobra.Command, args []string) {
 			return
 		}
 
-		// Parse width and height
 		width, err := strconv.ParseUint(widthStr, 10, 32)
 		if err != nil {
 			http.Error(w, "Invalid width parameter: must be a positive integer", http.StatusBadRequest)
@@ -75,7 +69,6 @@ func runServer(cmd *cobra.Command, args []string) {
 			return
 		}
 
-		// Parse dither parameter (optional, defaults to true)
 		enableDither := true
 		if ditherStr != "" {
 			enableDither, err = strconv.ParseBool(ditherStr)
@@ -85,7 +78,6 @@ func runServer(cmd *cobra.Command, args []string) {
 			}
 		}
 
-		// Parse normalize parameter (optional, defaults to true)
 		enableNormalize := true
 		if normalizeStr != "" {
 			enableNormalize, err = strconv.ParseBool(normalizeStr)
@@ -95,16 +87,13 @@ func runServer(cmd *cobra.Command, args []string) {
 			}
 		}
 
-		// Validate dimensions
 		if width == 0 || height == 0 {
 			http.Error(w, "Width and height must be greater than 0", http.StatusBadRequest)
 			return
 		}
 
-		// Process the image
-		processedImage, err := processor.ProcessImage(imageURL, uint(width), uint(height), enableDither, enableNormalize, etag)
+		processedImage, responseETag, err := processor.ProcessImage(imageURL, uint(width), uint(height), enableDither, enableNormalize, etag)
 		if err != nil {
-			// Check if it's a "not modified" error
 			var notModifiedErr ErrNotModified
 			if errors.As(err, &notModifiedErr) {
 				w.WriteHeader(http.StatusNotModified)
@@ -115,11 +104,13 @@ func runServer(cmd *cobra.Command, args []string) {
 			return
 		}
 
-		// Set response headers for bitmap
 		w.Header().Set("Content-Type", "image/bmp")
 		w.Header().Set("Cache-Control", "no-cache")
 
-		// Encode and send the image as BMP using the official package
+		if responseETag != "" {
+			w.Header().Set("ETag", responseETag)
+		}
+
 		if err := bmp.Encode(w, processedImage); err != nil {
 			log.Printf("Error encoding BMP: %v", err)
 			http.Error(w, "Error encoding BMP", http.StatusInternalServerError)
@@ -127,7 +118,6 @@ func runServer(cmd *cobra.Command, args []string) {
 		}
 	})
 
-	// Create a simple health check endpoint
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
