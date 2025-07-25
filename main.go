@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -44,6 +45,9 @@ func runServer(cmd *cobra.Command, args []string) {
 		heightStr := r.URL.Query().Get("height")
 		ditherStr := r.URL.Query().Get("dither")
 		normalizeStr := r.URL.Query().Get("normalize")
+
+		// Get ETag from request headers
+		etag := r.Header.Get("If-None-Match")
 
 		// Validate required parameters
 		if imageURL == "" {
@@ -98,8 +102,14 @@ func runServer(cmd *cobra.Command, args []string) {
 		}
 
 		// Process the image
-		processedImage, err := processor.ProcessImage(imageURL, uint(width), uint(height), enableDither, enableNormalize)
+		processedImage, err := processor.ProcessImage(imageURL, uint(width), uint(height), enableDither, enableNormalize, etag)
 		if err != nil {
+			// Check if it's a "not modified" error
+			var notModifiedErr ErrNotModified
+			if errors.As(err, &notModifiedErr) {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
 			log.Printf("Error processing image: %v", err)
 			http.Error(w, fmt.Sprintf("Error processing image: %v", err), http.StatusInternalServerError)
 			return

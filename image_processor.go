@@ -230,11 +230,11 @@ func (ip *ImageProcessor) applyHistogramNormalization(img *image.Gray) *image.Gr
 // ProcessImage downloads an image from URL and resizes it to fit within the specified dimensions
 // while maintaining aspect ratio, then converts to grayscale, optionally applies histogram normalization,
 // and optionally applies Floyd-Steinberg dithering
-func (ip *ImageProcessor) ProcessImage(imageURL string, maxWidth, maxHeight uint, enableDither bool, enableNormalize bool) (image.Image, error) {
+func (ip *ImageProcessor) ProcessImage(imageURL string, maxWidth, maxHeight uint, enableDither bool, enableNormalize bool, etag string) (image.Image, error) {
 	// Download the image
-	img, err := ip.downloadImage(imageURL)
+	img, err := ip.downloadImage(imageURL, etag)
 	if err != nil {
-		return nil, fmt.Errorf("failed to download image: %w", err)
+		return nil, err
 	}
 
 	// Resize the image to fit within the specified dimensions
@@ -262,14 +262,38 @@ func (ip *ImageProcessor) ProcessImage(imageURL string, maxWidth, maxHeight uint
 	return processedImg, nil
 }
 
-// downloadImage downloads an image from the given URL
-func (ip *ImageProcessor) downloadImage(imageURL string) (image.Image, error) {
-	// Make HTTP GET request
-	resp, err := http.Get(imageURL)
+// ErrNotModified is returned when the image has not been modified (304 status)
+type ErrNotModified struct{}
+
+func (e ErrNotModified) Error() string {
+	return "image not modified"
+}
+
+// downloadImage downloads an image from the given URL with optional ETag support
+func (ip *ImageProcessor) downloadImage(imageURL string, etag string) (image.Image, error) {
+	// Create HTTP client and request
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", imageURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	// Add If-None-Match header if ETag is provided
+	if etag != "" {
+		req.Header.Set("If-None-Match", etag)
+	}
+
+	// Make HTTP request
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to make HTTP request: %w", err)
 	}
 	defer resp.Body.Close()
+
+	// Check for 304 Not Modified
+	if resp.StatusCode == http.StatusNotModified {
+		return nil, ErrNotModified{}
+	}
 
 	// Check if the request was successful
 	if resp.StatusCode != http.StatusOK {
