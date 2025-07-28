@@ -66,8 +66,8 @@ func (ip *ImageProcessor) applyFloydSteinbergDithering(img image.Image, palette 
 		}
 	}
 
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
+	for y := range height {
+		for x := range width {
 			oldPixel := rgbaImg.RGBAAt(x+bounds.Min.X, y+bounds.Min.Y)
 
 			colorIndex := ip.findClosestColorIndex(oldPixel, palette)
@@ -166,7 +166,7 @@ func (ip *ImageProcessor) applyHistogramNormalization(img *image.Gray) *image.Gr
 
 	minVal := 255
 	maxVal := 0
-	for i := 0; i < 256; i++ {
+	for i := range 256 {
 		if histogram[i] > 0 {
 			if i < minVal {
 				minVal = i
@@ -287,10 +287,7 @@ func (ip *ImageProcessor) resizeImage(img image.Image, maxWidth, maxHeight uint)
 	scaleX := float64(maxWidth) / float64(originalWidth)
 	scaleY := float64(maxHeight) / float64(originalHeight)
 
-	scale := scaleX
-	if scaleY > scaleX {
-		scale = scaleY
-	}
+	scale := max(scaleY, scaleX)
 
 	scaledWidth := float64(originalWidth) * scale
 	scaledHeight := float64(originalHeight) * scale
@@ -300,8 +297,8 @@ func (ip *ImageProcessor) resizeImage(img image.Image, maxWidth, maxHeight uint)
 
 	resizedImg := image.NewRGBA(image.Rect(0, 0, int(maxWidth), int(maxHeight)))
 
-	for y := 0; y < int(maxHeight); y++ {
-		for x := 0; x < int(maxWidth); x++ {
+	for y := range int(maxHeight) {
+		for x := range int(maxWidth) {
 			// Map the destination coordinates to source coordinates, accounting for centering offset
 			srcX := int((float64(x) + offsetX) / scale)
 			srcY := int((float64(y) + offsetY) / scale)
