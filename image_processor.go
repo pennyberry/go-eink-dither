@@ -18,10 +18,10 @@ func NewImageProcessor() *ImageProcessor {
 
 func (ip *ImageProcessor) getDefaultGrayscalePalette() color.Palette {
 	return color.Palette{
-		color.RGBA{0, 0, 0, 255},       // Black
-		color.RGBA{85, 85, 85, 255},    // Dark gray
-		color.RGBA{170, 170, 170, 255}, // Light gray
-		color.RGBA{255, 255, 255, 255}, // White
+		color.RGBA{0, 0, 0, 255},
+		color.RGBA{85, 85, 85, 255},
+		color.RGBA{170, 170, 170, 255},
+		color.RGBA{255, 255, 255, 255},
 	}
 }
 
