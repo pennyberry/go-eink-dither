@@ -8,6 +8,8 @@ import (
 	"image/jpeg"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 )
 
 type ImageProcessor struct{}
@@ -23,6 +25,55 @@ func (ip *ImageProcessor) getDefaultGrayscalePalette() color.Palette {
 		color.RGBA{170, 170, 170, 255},
 		color.RGBA{255, 255, 255, 255},
 	}
+}
+
+func (ip *ImageProcessor) parseHexColorsPalette(colorsStr string) (color.Palette, error) {
+	if colorsStr == "" {
+		return ip.getDefaultGrayscalePalette(), nil
+	}
+
+	colorStrs := strings.Split(colorsStr, ",")
+	palette := make(color.Palette, 0, len(colorStrs))
+
+	for _, colorStr := range colorStrs {
+		colorStr = strings.TrimSpace(colorStr)
+		if colorStr == "" {
+			continue
+		}
+
+		// Remove # prefix if present
+		if strings.HasPrefix(colorStr, "#") {
+			colorStr = colorStr[1:]
+		}
+
+		// Parse hex color
+		if len(colorStr) != 6 {
+			return nil, fmt.Errorf("invalid hex color format: %s (expected 6 characters)", colorStr)
+		}
+
+		r, err := strconv.ParseUint(colorStr[0:2], 16, 8)
+		if err != nil {
+			return nil, fmt.Errorf("invalid red component in hex color %s: %w", colorStr, err)
+		}
+
+		g, err := strconv.ParseUint(colorStr[2:4], 16, 8)
+		if err != nil {
+			return nil, fmt.Errorf("invalid green component in hex color %s: %w", colorStr, err)
+		}
+
+		b, err := strconv.ParseUint(colorStr[4:6], 16, 8)
+		if err != nil {
+			return nil, fmt.Errorf("invalid blue component in hex color %s: %w", colorStr, err)
+		}
+
+		palette = append(palette, color.RGBA{uint8(r), uint8(g), uint8(b), 255})
+	}
+
+	if len(palette) == 0 {
+		return ip.getDefaultGrayscalePalette(), nil
+	}
+
+	return palette, nil
 }
 
 func (ip *ImageProcessor) findClosestColorIndex(c color.Color, palette color.Palette) uint8 {
@@ -48,8 +99,48 @@ func (ip *ImageProcessor) findClosestColorIndex(c color.Color, palette color.Pal
 	return closestIndex
 }
 
+func (ip *ImageProcessor) findClosestColorIndexWeighted(c color.Color, palette color.Palette) uint8 {
+	r1, g1, b1, _ := c.RGBA()
+
+	// Convert to 8-bit values for easier calculation
+	r1_8 := float64(r1 >> 8)
+	g1_8 := float64(g1 >> 8)
+	b1_8 := float64(b1 >> 8)
+
+	closestIndex := uint8(0)
+	minDistance := float64(^uint(0) >> 1) // Max float64
+
+	for i, paletteColor := range palette {
+		r2, g2, b2, _ := paletteColor.RGBA()
+
+		// Convert to 8-bit values
+		r2_8 := float64(r2 >> 8)
+		g2_8 := float64(g2 >> 8)
+		b2_8 := float64(b2 >> 8)
+
+		// Use weighted Euclidean distance that accounts for human perception
+		// Green is more perceptually important, then red, then blue
+		dr := r1_8 - r2_8
+		dg := g1_8 - g2_8
+		db := b1_8 - b2_8
+
+		distance := 0.299*dr*dr + 0.587*dg*dg + 0.114*db*db
+
+		if distance < minDistance {
+			minDistance = distance
+			closestIndex = uint8(i)
+		}
+	}
+
+	return closestIndex
+}
+
 func (ip *ImageProcessor) ApplyDithering(img image.Image, palette color.Palette) (*image.Paletted, error) {
 	return ip.applyFloydSteinbergDithering(img, palette), nil
+}
+
+func (ip *ImageProcessor) ApplyColorDithering(img image.Image, palette color.Palette) (*image.Paletted, error) {
+	return ip.applyFloydSteinbergColorDithering(img, palette), nil
 }
 
 func (ip *ImageProcessor) applyFloydSteinbergDithering(img image.Image, palette color.Palette) *image.Paletted {
@@ -71,6 +162,57 @@ func (ip *ImageProcessor) applyFloydSteinbergDithering(img image.Image, palette 
 			oldPixel := rgbaImg.RGBAAt(x+bounds.Min.X, y+bounds.Min.Y)
 
 			colorIndex := ip.findClosestColorIndex(oldPixel, palette)
+			newPixel := palette[colorIndex]
+
+			palettedImg.SetColorIndex(x, y, colorIndex)
+
+			rgbaImg.Set(x+bounds.Min.X, y+bounds.Min.Y, newPixel)
+
+			oldR, oldG, oldB, _ := oldPixel.RGBA()
+			newR, newG, newB, _ := newPixel.RGBA()
+
+			errR := int(oldR>>8) - int(newR>>8)
+			errG := int(oldG>>8) - int(newG>>8)
+			errB := int(oldB>>8) - int(newB>>8)
+
+			// Distribute error to neighboring pixels
+			if x+1 < width {
+				ip.addError(rgbaImg, x+1+bounds.Min.X, y+bounds.Min.Y, errR, errG, errB, 7.0/16.0)
+			}
+			if y+1 < height {
+				if x > 0 {
+					ip.addError(rgbaImg, x-1+bounds.Min.X, y+1+bounds.Min.Y, errR, errG, errB, 3.0/16.0)
+				}
+				ip.addError(rgbaImg, x+bounds.Min.X, y+1+bounds.Min.Y, errR, errG, errB, 5.0/16.0)
+				if x+1 < width {
+					ip.addError(rgbaImg, x+1+bounds.Min.X, y+1+bounds.Min.Y, errR, errG, errB, 1.0/16.0)
+				}
+			}
+		}
+	}
+
+	return palettedImg
+}
+
+func (ip *ImageProcessor) applyFloydSteinbergColorDithering(img image.Image, palette color.Palette) *image.Paletted {
+	bounds := img.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+
+	palettedImg := image.NewPaletted(image.Rect(0, 0, width, height), palette)
+
+	rgbaImg := image.NewRGBA(bounds)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			rgbaImg.Set(x, y, img.At(x, y))
+		}
+	}
+
+	for y := range height {
+		for x := range width {
+			oldPixel := rgbaImg.RGBAAt(x+bounds.Min.X, y+bounds.Min.Y)
+
+			colorIndex := ip.findClosestColorIndexWeighted(oldPixel, palette)
 			newPixel := palette[colorIndex]
 
 			palettedImg.SetColorIndex(x, y, colorIndex)
@@ -200,7 +342,7 @@ func (ip *ImageProcessor) applyHistogramNormalization(img *image.Gray) *image.Gr
 	return normalizedImg
 }
 
-func (ip *ImageProcessor) ProcessImage(imageURL string, maxWidth, maxHeight uint, enableDither bool, enableNormalize bool, etag string) (image.Image, string, error) {
+func (ip *ImageProcessor) ProcessImage(imageURL string, maxWidth, maxHeight uint, enableDither bool, enableNormalize bool, colorsStr string, etag string) (image.Image, string, error) {
 	// Download the image
 	img, responseETag, err := ip.downloadImage(imageURL, etag)
 	if err != nil {
@@ -210,26 +352,58 @@ func (ip *ImageProcessor) ProcessImage(imageURL string, maxWidth, maxHeight uint
 	// Resize the image to fit within the specified dimensions
 	resizedImg := ip.resizeImage(img, maxWidth, maxHeight)
 
-	// Convert to grayscale
-	grayscaleImg := ip.convertToGrayscale(resizedImg)
-
-	// Apply histogram normalization if enabled
-	var processedImg image.Image = grayscaleImg
-	if enableNormalize {
-		processedImg = ip.applyHistogramNormalization(grayscaleImg)
+	// Parse custom color palette
+	palette, err := ip.parseHexColorsPalette(colorsStr)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to parse color palette: %w", err)
 	}
 
-	// Apply dithering with fixed grayscale palette if enabled
+	// Check if we're using custom colors (not the default grayscale palette)
+	isCustomColors := colorsStr != ""
+
+	// Apply dithering if enabled
 	if enableDither {
-		palette := ip.getDefaultGrayscalePalette()
-		ditheredImg, err := ip.ApplyDithering(processedImg, palette)
+		var ditheredImg *image.Paletted
+		if isCustomColors {
+			// For custom colors, work with the original RGB image
+			ditheredImg, err = ip.ApplyColorDithering(resizedImg, palette)
+		} else {
+			// For grayscale, convert to grayscale first and optionally normalize
+			grayscaleImg := ip.convertToGrayscale(resizedImg)
+			var processedImg image.Image = grayscaleImg
+			if enableNormalize {
+				processedImg = ip.applyHistogramNormalization(grayscaleImg)
+			}
+			ditheredImg, err = ip.ApplyDithering(processedImg, palette)
+		}
 		if err != nil {
 			return nil, "", fmt.Errorf("failed to apply dithering: %w", err)
 		}
 		return ditheredImg, responseETag, nil
 	}
 
-	return processedImg, responseETag, nil
+	// If dithering is disabled, return processed image
+	if isCustomColors {
+		// For custom colors without dithering, we still need to reduce to the palette colors
+		// but without dithering (simple nearest color matching)
+		bounds := resizedImg.Bounds()
+		palettedImg := image.NewPaletted(bounds, palette)
+		for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+			for x := bounds.Min.X; x < bounds.Max.X; x++ {
+				originalColor := resizedImg.At(x, y)
+				colorIndex := ip.findClosestColorIndexWeighted(originalColor, palette)
+				palettedImg.SetColorIndex(x-bounds.Min.X, y-bounds.Min.Y, colorIndex)
+			}
+		}
+		return palettedImg, responseETag, nil
+	} else {
+		// For grayscale without dithering
+		grayscaleImg := ip.convertToGrayscale(resizedImg)
+		if enableNormalize {
+			return ip.applyHistogramNormalization(grayscaleImg), responseETag, nil
+		}
+		return grayscaleImg, responseETag, nil
+	}
 }
 
 type ErrNotModified struct{}

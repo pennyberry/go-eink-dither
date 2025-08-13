@@ -42,6 +42,7 @@ func runServer(cmd *cobra.Command, args []string) {
 		heightStr := r.URL.Query().Get("height")
 		ditherStr := r.URL.Query().Get("dither")
 		normalizeStr := r.URL.Query().Get("normalize")
+		colorsStr := r.URL.Query().Get("colors")
 
 		etag := r.Header.Get("If-None-Match")
 
@@ -92,7 +93,7 @@ func runServer(cmd *cobra.Command, args []string) {
 			return
 		}
 
-		processedImage, responseETag, err := processor.ProcessImage(imageURL, uint(width), uint(height), enableDither, enableNormalize, etag)
+		processedImage, responseETag, err := processor.ProcessImage(imageURL, uint(width), uint(height), enableDither, enableNormalize, colorsStr, etag)
 		if err != nil {
 			var notModifiedErr ErrNotModified
 			if errors.As(err, &notModifiedErr) {
