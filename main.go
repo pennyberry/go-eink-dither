@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"image"
 	"log"
 	"net/http"
 	"strconv"
@@ -93,20 +94,45 @@ func runServer(cmd *cobra.Command, args []string) {
 			return
 		}
 
-		processedImage, responseETag, err := processor.ProcessImage(imageURL, uint(width), uint(height), enableDither, enableNormalize, colorsStr, etag)
-		if err != nil {
-			var notModifiedErr ErrNotModified
-			if errors.As(err, &notModifiedErr) {
-				w.WriteHeader(http.StatusNotModified)
+		var processedImage image.Image
+		var responseETag string
+
+		if colorsStr != "" {
+			// Legacy mode: use old custom colors method (for backward compatibility)
+			processedImage, responseETag, err = processor.ProcessImage(imageURL, uint(width), uint(height), enableDither, enableNormalize, colorsStr, etag)
+			if err != nil {
+				var notModifiedErr ErrNotModified
+				if errors.As(err, &notModifiedErr) {
+					w.WriteHeader(http.StatusNotModified)
+					return
+				}
+				log.Printf("Error processing image: %v", err)
+				http.Error(w, fmt.Sprintf("Error processing image: %v", err), http.StatusInternalServerError)
 				return
 			}
-			log.Printf("Error processing image: %v", err)
-			http.Error(w, fmt.Sprintf("Error processing image: %v", err), http.StatusInternalServerError)
-			return
+		} else {
+			// Default mode: use Spectra 6 calibrated processing for optimal results
+			processedImage, responseETag, err = processor.ProcessImageWithSpectra6Calibration(
+				imageURL, uint(width), uint(height), enableDither, enableNormalize, etag)
+			if err != nil {
+				var notModifiedErr ErrNotModified
+				if errors.As(err, &notModifiedErr) {
+					w.WriteHeader(http.StatusNotModified)
+					return
+				}
+				log.Printf("Error processing image with Spectra 6 calibration: %v", err)
+				http.Error(w, fmt.Sprintf("Error processing image: %v", err), http.StatusInternalServerError)
+				return
+			}
 		}
 
 		w.Header().Set("Content-Type", "image/bmp")
 		w.Header().Set("Cache-Control", "no-cache")
+
+		// Add calibration info to headers
+		if colorsStr == "" {
+			w.Header().Set("X-Calibration-Used", "spectra6")
+		}
 
 		if responseETag != "" {
 			w.Header().Set("ETag", responseETag)

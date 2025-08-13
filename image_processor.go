@@ -406,6 +406,50 @@ func (ip *ImageProcessor) ProcessImage(imageURL string, maxWidth, maxHeight uint
 	}
 }
 
+// ProcessImageWithSpectra6Calibration processes an image using Spectra 6 calibration for optimal e-ink results
+func (ip *ImageProcessor) ProcessImageWithSpectra6Calibration(imageURL string, maxWidth, maxHeight uint, enableDither bool, enableNormalize bool, etag string) (image.Image, string, error) {
+	// Download the image
+	img, responseETag, err := ip.downloadImage(imageURL, etag)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Resize the image to fit within the specified dimensions
+	resizedImg := ip.resizeImage(img, maxWidth, maxHeight)
+
+	// Get Spectra 6 calibration
+	calibration := GetSpectra6Calibration()
+	processingPalette := calibration.ProcessingPalette
+
+	// Apply dithering if enabled
+	if enableDither {
+		// For Spectra 6, always use color dithering on the original RGB image
+		ditheredImg, err := ip.ApplyColorDithering(resizedImg, processingPalette)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to apply dithering: %w", err)
+		}
+
+		// Convert processing colors to device colors and return
+		deviceImg := ApplyDeviceColorMapping(ditheredImg, calibration)
+		return deviceImg, responseETag, nil
+	}
+
+	// If dithering is disabled, quantize to Spectra 6 colors without dithering
+	bounds := resizedImg.Bounds()
+	palettedImg := image.NewPaletted(bounds, processingPalette)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			originalColor := resizedImg.At(x, y)
+			colorIndex := ip.findClosestColorIndexWeighted(originalColor, processingPalette)
+			palettedImg.SetColorIndex(x-bounds.Min.X, y-bounds.Min.Y, colorIndex)
+		}
+	}
+
+	// Convert processing colors to device colors and return
+	deviceImg := ApplyDeviceColorMapping(palettedImg, calibration)
+	return deviceImg, responseETag, nil
+}
+
 type ErrNotModified struct{}
 
 func (e ErrNotModified) Error() string {
