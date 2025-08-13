@@ -34,7 +34,7 @@ The server will start on port 8080.
 
 #### Process Image
 ```
-GET /process?url=<image_url>&width=<width>&height=<height>&dither=<true|false>&display=<display_type>
+GET /process?url=<image_url>&width=<width>&height=<height>&dither=<true|false>
 ```
 
 **Parameters:**
@@ -42,11 +42,6 @@ GET /process?url=<image_url>&width=<width>&height=<height>&dither=<true|false>&d
 - `width`: Maximum width in pixels (required)
 - `height`: Maximum height in pixels (required)
 - `dither`: Enable/disable Floyd-Steinberg dithering (optional, defaults to `true`)
-- `display`: Target display type (optional):
-  - `spectra-e6`: Use color calibration optimized for Spectra 6 e-ink displays
-  - If not specified: Use original 4-color grayscale processing
-- `colors`: Custom hex color palette (optional, comma-separated, e.g., `000000,ffffff,ff0000`)
-- `normalize`: Enable/disable histogram normalization (optional, defaults to `true`)
 
 **Response:**
 - Returns a BMP image with indexed colors from the fixed 4-color palette
@@ -54,19 +49,14 @@ GET /process?url=<image_url>&width=<width>&height=<height>&dither=<true|false>&d
 
 **Examples:**
 
-Process image with default 4-color grayscale:
+Process image with dithering (default):
 ```
 http://localhost:8080/process?url=https://picsum.photos/500/500&width=400&height=300
 ```
 
-Process image optimized for Spectra 6 e-ink display:
+Process image with dithering explicitly enabled:
 ```
-http://localhost:8080/process?url=https://picsum.photos/500/500&width=400&height=300&display=spectra-e6
-```
-
-Process image with custom colors:
-```
-http://localhost:8080/process?url=https://picsum.photos/500/500&width=400&height=300&colors=000000,ffffff,ff0000,00ff00
+http://localhost:8080/process?url=https://picsum.photos/500/500&width=400&height=300&dither=true
 ```
 
 Process image without dithering:
@@ -85,19 +75,12 @@ Returns "OK" if the server is running.
 
 1. **Download**: The server downloads the image from the provided URL
 2. **Resize**: Calculates the appropriate scale factor to fit the image within the specified dimensions while maintaining aspect ratio
-3. **Process**: Depending on the `display` parameter:
-   
-   **Default Mode (4-color grayscale):**
-   - Applies Floyd-Steinberg dithering with a fixed 4-color grayscale palette:
-     - Black: `#000000`, Dark Gray: `#555555`, Light Gray: `#AAAAAA`, White: `#FFFFFF`
-   
-   **Spectra 6 Mode (`display=spectra-e6`):**
-   - Uses color calibration system for optimal e-ink results
-   - Dithers with realistic colors that match actual Spectra 6 appearance
-   - Outputs device-compatible colors for hardware: Black, White, Blue, Green, Red, Yellow
-   - Produces significantly better color gradients and transitions on real displays
-
-4. **Return**: Returns the processed image as an indexed color bitmap (.bmp)
+3. **Dither** (optional): Applies Floyd-Steinberg dithering with a fixed 4-color grayscale palette:
+   - Black: `#000000` (RGB: 0, 0, 0)
+   - Dark Gray: `#555555` (RGB: 85, 85, 85)
+   - Light Gray: `#AAAAAA` (RGB: 170, 170, 170)
+   - White: `#FFFFFF` (RGB: 255, 255, 255)
+4. **Return**: Returns the processed image as an indexed color bitmap (.bmp) with the exact 4-color palette
 
 ## Indexed Color Bitmap Output
 
