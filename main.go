@@ -44,6 +44,7 @@ func runServer(cmd *cobra.Command, args []string) {
 		ditherStr := r.URL.Query().Get("dither")
 		normalizeStr := r.URL.Query().Get("normalize")
 		colorsStr := r.URL.Query().Get("colors")
+		displayStr := r.URL.Query().Get("display")
 
 		etag := r.Header.Get("If-None-Match")
 
@@ -97,21 +98,8 @@ func runServer(cmd *cobra.Command, args []string) {
 		var processedImage image.Image
 		var responseETag string
 
-		if colorsStr != "" {
-			// Legacy mode: use old custom colors method (for backward compatibility)
-			processedImage, responseETag, err = processor.ProcessImage(imageURL, uint(width), uint(height), enableDither, enableNormalize, colorsStr, etag)
-			if err != nil {
-				var notModifiedErr ErrNotModified
-				if errors.As(err, &notModifiedErr) {
-					w.WriteHeader(http.StatusNotModified)
-					return
-				}
-				log.Printf("Error processing image: %v", err)
-				http.Error(w, fmt.Sprintf("Error processing image: %v", err), http.StatusInternalServerError)
-				return
-			}
-		} else {
-			// Default mode: use Spectra 6 calibrated processing for optimal results
+		if displayStr == "spectra-e6" {
+			// Spectra E6 mode: use calibrated processing for optimal e-ink results
 			processedImage, responseETag, err = processor.ProcessImageWithSpectra6Calibration(
 				imageURL, uint(width), uint(height), enableDither, enableNormalize, etag)
 			if err != nil {
@@ -124,14 +112,27 @@ func runServer(cmd *cobra.Command, args []string) {
 				http.Error(w, fmt.Sprintf("Error processing image: %v", err), http.StatusInternalServerError)
 				return
 			}
+		} else {
+			// Default mode: use existing behavior (original implementation)
+			processedImage, responseETag, err = processor.ProcessImage(imageURL, uint(width), uint(height), enableDither, enableNormalize, colorsStr, etag)
+			if err != nil {
+				var notModifiedErr ErrNotModified
+				if errors.As(err, &notModifiedErr) {
+					w.WriteHeader(http.StatusNotModified)
+					return
+				}
+				log.Printf("Error processing image: %v", err)
+				http.Error(w, fmt.Sprintf("Error processing image: %v", err), http.StatusInternalServerError)
+				return
+			}
 		}
 
 		w.Header().Set("Content-Type", "image/bmp")
 		w.Header().Set("Cache-Control", "no-cache")
 
-		// Add calibration info to headers
-		if colorsStr == "" {
-			w.Header().Set("X-Calibration-Used", "spectra6")
+		// Add display info to headers
+		if displayStr == "spectra-e6" {
+			w.Header().Set("X-Display-Calibration", "spectra-e6")
 		}
 
 		if responseETag != "" {
