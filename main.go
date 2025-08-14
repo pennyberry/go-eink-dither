@@ -20,8 +20,8 @@ func main() {
 		Use:   "go-eink-dither",
 		Short: "A web service for processing images with dithering for e-ink displays",
 		Long: `go-eink-dither is a web service that downloads images from URLs,
-resizes them, converts to grayscale, and applies Floyd-Steinberg dithering
-optimized for e-ink displays.`,
+resizes them, and applies Floyd-Steinberg dithering with calibrated color palettes
+optimized for e-ink displays. Default palette is calibrated for Spektra E6 displays.`,
 		Run: runServer,
 	}
 

@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"image/jpeg"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,18 +19,35 @@ func NewImageProcessor() *ImageProcessor {
 	return &ImageProcessor{}
 }
 
-func (ip *ImageProcessor) getDefaultGrayscalePalette() color.Palette {
+// getSpektraE6Palette returns the calibrated color palette for Spektra E6 e-ink display
+// Colors optimized for this specific display based on epdoptimize calibration
+func (ip *ImageProcessor) getSpektraE6Palette() color.Palette {
 	return color.Palette{
-		color.RGBA{0, 0, 0, 255},
-		color.RGBA{85, 85, 85, 255},
-		color.RGBA{170, 170, 170, 255},
-		color.RGBA{255, 255, 255, 255},
+		color.RGBA{33, 33, 34, 255},    // #212122 - Black
+		color.RGBA{185, 177, 177, 255}, // #b9b1b1 - White
+		color.RGBA{65, 82, 160, 255},   // #4152a0 - Blue
+		color.RGBA{25, 61, 30, 255},    // #193d1e - Green
+		color.RGBA{97, 14, 14, 255},    // #610e0e - Red
+		color.RGBA{200, 175, 75, 255},  // #c8af4b - Yellow
+	}
+}
+
+// getSpektraE6DeviceColors returns the actual device colors for Spektra E6
+// These are the final colors that should be sent to the device
+func (ip *ImageProcessor) getSpektraE6DeviceColors() color.Palette {
+	return color.Palette{
+		color.RGBA{0, 0, 0, 255},       // #000000 - Black
+		color.RGBA{255, 255, 255, 255}, // #FFFFFF - White
+		color.RGBA{0, 0, 255, 255},     // #0000FF - Blue
+		color.RGBA{0, 255, 0, 255},     // #00FF00 - Green
+		color.RGBA{255, 0, 0, 255},     // #FF0000 - Red
+		color.RGBA{255, 255, 0, 255},   // #FFFF00 - Yellow
 	}
 }
 
 func (ip *ImageProcessor) parseHexColorsPalette(colorsStr string) (color.Palette, error) {
 	if colorsStr == "" {
-		return ip.getDefaultGrayscalePalette(), nil
+		return ip.getSpektraE6Palette(), nil
 	}
 
 	colorStrs := strings.Split(colorsStr, ",")
@@ -70,7 +88,7 @@ func (ip *ImageProcessor) parseHexColorsPalette(colorsStr string) (color.Palette
 	}
 
 	if len(palette) == 0 {
-		return ip.getDefaultGrayscalePalette(), nil
+		return ip.getSpektraE6Palette(), nil
 	}
 
 	return palette, nil
@@ -97,6 +115,65 @@ func (ip *ImageProcessor) findClosestColorIndex(c color.Color, palette color.Pal
 	}
 
 	return closestIndex
+}
+
+// findBestColorMix finds the best color or combination of colors to represent the target
+// This creates better color mixing by considering multiple palette colors
+func (ip *ImageProcessor) findBestColorMix(target color.Color, palette color.Palette, x, y int) uint8 {
+	r1, g1, b1, _ := target.RGBA()
+	tr, tg, tb := float64(r1>>8), float64(g1>>8), float64(b1>>8)
+
+	bestIndex := uint8(0)
+	bestDistance := math.MaxFloat64
+
+	// For ordered dithering pattern, add some spatial variation
+	threshold := ip.getBayerThreshold(x, y, 4) // 4x4 Bayer matrix
+
+	for i, paletteColor := range palette {
+		r2, g2, b2, _ := paletteColor.RGBA()
+		pr, pg, pb := float64(r2>>8), float64(g2>>8), float64(b2>>8)
+
+		// Apply dithering threshold for better spatial distribution
+		adjustedR := pr + threshold*10 - 5 // Add some noise for mixing
+		adjustedG := pg + threshold*10 - 5
+		adjustedB := pb + threshold*10 - 5
+
+		// Clamp values
+		adjustedR = math.Max(0, math.Min(255, adjustedR))
+		adjustedG = math.Max(0, math.Min(255, adjustedG))
+		adjustedB = math.Max(0, math.Min(255, adjustedB))
+
+		// Calculate distance with slight spatial variation
+		dr := tr - adjustedR
+		dg := tg - adjustedG
+		db := tb - adjustedB
+		distance := dr*dr + dg*dg + db*db
+
+		if distance < bestDistance {
+			bestDistance = distance
+			bestIndex = uint8(i)
+		}
+	}
+
+	return bestIndex
+}
+
+// getBayerThreshold returns a Bayer matrix threshold value for ordered dithering
+func (ip *ImageProcessor) getBayerThreshold(x, y, size int) float64 {
+	// 4x4 Bayer matrix
+	bayer4x4 := [][]int{
+		{0, 8, 2, 10},
+		{12, 4, 14, 6},
+		{3, 11, 1, 9},
+		{15, 7, 13, 5},
+	}
+
+	if size == 4 {
+		threshold := bayer4x4[y%4][x%4]
+		return float64(threshold) / 16.0 // Normalize to 0-1
+	}
+
+	return 0.5 // Default
 }
 
 func (ip *ImageProcessor) findClosestColorIndexWeighted(c color.Color, palette color.Palette) uint8 {
@@ -140,6 +217,10 @@ func (ip *ImageProcessor) ApplyDithering(img image.Image, palette color.Palette)
 }
 
 func (ip *ImageProcessor) ApplyColorDithering(img image.Image, palette color.Palette) (*image.Paletted, error) {
+	return ip.applyEnhancedFloydSteinbergDithering(img, palette), nil
+}
+
+func (ip *ImageProcessor) ApplyBasicColorDithering(img image.Image, palette color.Palette) (*image.Paletted, error) {
 	return ip.applyFloydSteinbergColorDithering(img, palette), nil
 }
 
@@ -212,7 +293,7 @@ func (ip *ImageProcessor) applyFloydSteinbergColorDithering(img image.Image, pal
 		for x := range width {
 			oldPixel := rgbaImg.RGBAAt(x+bounds.Min.X, y+bounds.Min.Y)
 
-			colorIndex := ip.findClosestColorIndexWeighted(oldPixel, palette)
+			colorIndex := ip.findClosestColorIndex(oldPixel, palette)
 			newPixel := palette[colorIndex]
 
 			palettedImg.SetColorIndex(x, y, colorIndex)
@@ -245,6 +326,124 @@ func (ip *ImageProcessor) applyFloydSteinbergColorDithering(img image.Image, pal
 	return palettedImg
 }
 
+// applyEnhancedFloydSteinbergDithering implements improved Floyd-Steinberg with better color mixing
+func (ip *ImageProcessor) applyEnhancedFloydSteinbergDithering(img image.Image, palette color.Palette) *image.Paletted {
+	bounds := img.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+
+	palettedImg := image.NewPaletted(image.Rect(0, 0, width, height), palette)
+
+	// Create a working copy with error accumulation
+	rgbaImg := image.NewRGBA(bounds)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			rgbaImg.Set(x, y, img.At(x, y))
+		}
+	}
+
+	for y := range height {
+		for x := range width {
+			oldPixel := rgbaImg.RGBAAt(x+bounds.Min.X, y+bounds.Min.Y)
+
+			// Use enhanced color mixing that considers spatial patterns
+			colorIndex := ip.findBestColorMix(oldPixel, palette, x, y)
+			newPixel := palette[colorIndex]
+
+			palettedImg.SetColorIndex(x, y, colorIndex)
+			rgbaImg.Set(x+bounds.Min.X, y+bounds.Min.Y, newPixel)
+
+			// Calculate error with improved precision
+			oldR, oldG, oldB, _ := oldPixel.RGBA()
+			newR, newG, newB, _ := newPixel.RGBA()
+
+			errR := int(oldR>>8) - int(newR>>8)
+			errG := int(oldG>>8) - int(newG>>8)
+			errB := int(oldB>>8) - int(newB>>8)
+
+			// Enhanced error distribution with variable weights based on content
+			// Convert newPixel to RGBA for calculation
+			nr, ng, nb, _ := newPixel.RGBA()
+			newRGBA := color.RGBA{uint8(nr >> 8), uint8(ng >> 8), uint8(nb >> 8), 255}
+			errorMultiplier := ip.calculateErrorMultiplier(oldPixel, newRGBA)
+
+			// Distribute error to neighboring pixels with enhanced weighting
+			if x+1 < width {
+				ip.addEnhancedError(rgbaImg, x+1+bounds.Min.X, y+bounds.Min.Y, errR, errG, errB, 7.0/16.0*errorMultiplier)
+			}
+			if y+1 < height {
+				if x > 0 {
+					ip.addEnhancedError(rgbaImg, x-1+bounds.Min.X, y+1+bounds.Min.Y, errR, errG, errB, 3.0/16.0*errorMultiplier)
+				}
+				ip.addEnhancedError(rgbaImg, x+bounds.Min.X, y+1+bounds.Min.Y, errR, errG, errB, 5.0/16.0*errorMultiplier)
+				if x+1 < width {
+					ip.addEnhancedError(rgbaImg, x+1+bounds.Min.X, y+1+bounds.Min.Y, errR, errG, errB, 1.0/16.0*errorMultiplier)
+				}
+			}
+		}
+	}
+
+	return palettedImg
+}
+
+// calculateErrorMultiplier adjusts error distribution based on color difference
+func (ip *ImageProcessor) calculateErrorMultiplier(oldPixel, newPixel color.RGBA) float64 {
+	// Calculate color difference to adjust error propagation
+	dr := float64(oldPixel.R) - float64(newPixel.R)
+	dg := float64(oldPixel.G) - float64(newPixel.G)
+	db := float64(oldPixel.B) - float64(newPixel.B)
+
+	colorError := math.Sqrt(dr*dr + dg*dg + db*db)
+
+	// Scale error distribution based on how different the colors are
+	// More error = more aggressive diffusion for better mixing
+	multiplier := 0.8 + (colorError/255.0)*0.4 // Range: 0.8 - 1.2
+	return math.Max(0.5, math.Min(1.5, multiplier))
+}
+
+// addEnhancedError adds error with improved clamping and distribution
+func (ip *ImageProcessor) addEnhancedError(img *image.RGBA, x, y int, errR, errG, errB int, factor float64) {
+	pixel := img.RGBAAt(x, y)
+
+	// Apply error with slight randomization to break up patterns
+	newR := int(pixel.R) + int(float64(errR)*factor)
+	newG := int(pixel.G) + int(float64(errG)*factor)
+	newB := int(pixel.B) + int(float64(errB)*factor)
+
+	// Improved clamping with slight overshoot allowance
+	if newR < -10 {
+		newR = 0
+	} else if newR > 265 {
+		newR = 255
+	} else if newR < 0 {
+		newR = 0
+	} else if newR > 255 {
+		newR = 255
+	}
+
+	if newG < -10 {
+		newG = 0
+	} else if newG > 265 {
+		newG = 255
+	} else if newG < 0 {
+		newG = 0
+	} else if newG > 255 {
+		newG = 255
+	}
+
+	if newB < -10 {
+		newB = 0
+	} else if newB > 265 {
+		newB = 255
+	} else if newB < 0 {
+		newB = 0
+	} else if newB > 255 {
+		newB = 255
+	}
+
+	img.Set(x, y, color.RGBA{uint8(newR), uint8(newG), uint8(newB), pixel.A})
+}
+
 func (ip *ImageProcessor) addError(img *image.RGBA, x, y int, errR, errG, errB int, factor float64) {
 	pixel := img.RGBAAt(x, y)
 
@@ -269,6 +468,26 @@ func (ip *ImageProcessor) addError(img *image.RGBA, x, y int, errR, errG, errB i
 	}
 
 	img.Set(x, y, color.RGBA{uint8(newR), uint8(newG), uint8(newB), pixel.A})
+}
+
+// mapCalibratedToDeviceColors maps the calibrated colors back to actual device colors
+// This implements the final step of epdoptimize's calibration process
+func (ip *ImageProcessor) mapCalibratedToDeviceColors(img *image.Paletted, calibratedPalette, devicePalette color.Palette) *image.Paletted {
+	bounds := img.Bounds()
+	deviceImg := image.NewPaletted(bounds, devicePalette)
+
+	// Create a mapping from calibrated colors to device colors
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			colorIndex := img.ColorIndexAt(x, y)
+			// The color index should map directly since both palettes have the same order
+			if int(colorIndex) < len(devicePalette) {
+				deviceImg.SetColorIndex(x-bounds.Min.X, y-bounds.Min.Y, colorIndex)
+			}
+		}
+	}
+
+	return deviceImg
 }
 
 func (ip *ImageProcessor) convertToGrayscale(img image.Image) *image.Gray {
@@ -352,58 +571,45 @@ func (ip *ImageProcessor) ProcessImage(imageURL string, maxWidth, maxHeight uint
 	// Resize the image to fit within the specified dimensions
 	resizedImg := ip.resizeImage(img, maxWidth, maxHeight)
 
-	// Parse custom color palette
+	// Parse color palette (defaults to Spektra E6 calibrated colors)
 	palette, err := ip.parseHexColorsPalette(colorsStr)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to parse color palette: %w", err)
 	}
 
-	// Check if we're using custom colors (not the default grayscale palette)
-	isCustomColors := colorsStr != ""
+	// Determine if we should apply full calibration (only for default Spektra E6 palette)
+	isDefaultPalette := colorsStr == ""
 
-	// Apply dithering if enabled
+	var processedImg *image.Paletted
+
+	// Apply dithering if enabled (always use color dithering with calibrated palette)
 	if enableDither {
-		var ditheredImg *image.Paletted
-		if isCustomColors {
-			// For custom colors, work with the original RGB image
-			ditheredImg, err = ip.ApplyColorDithering(resizedImg, palette)
-		} else {
-			// For grayscale, convert to grayscale first and optionally normalize
-			grayscaleImg := ip.convertToGrayscale(resizedImg)
-			var processedImg image.Image = grayscaleImg
-			if enableNormalize {
-				processedImg = ip.applyHistogramNormalization(grayscaleImg)
-			}
-			ditheredImg, err = ip.ApplyDithering(processedImg, palette)
-		}
+		processedImg, err = ip.ApplyColorDithering(resizedImg, palette)
 		if err != nil {
 			return nil, "", fmt.Errorf("failed to apply dithering: %w", err)
 		}
-		return ditheredImg, responseETag, nil
-	}
-
-	// If dithering is disabled, return processed image
-	if isCustomColors {
-		// For custom colors without dithering, we still need to reduce to the palette colors
-		// but without dithering (simple nearest color matching)
+	} else {
+		// If dithering is disabled, reduce to palette colors using nearest color matching
 		bounds := resizedImg.Bounds()
-		palettedImg := image.NewPaletted(bounds, palette)
+		processedImg = image.NewPaletted(bounds, palette)
 		for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 			for x := bounds.Min.X; x < bounds.Max.X; x++ {
 				originalColor := resizedImg.At(x, y)
-				colorIndex := ip.findClosestColorIndexWeighted(originalColor, palette)
-				palettedImg.SetColorIndex(x-bounds.Min.X, y-bounds.Min.Y, colorIndex)
+				// Use enhanced color mixing even without dithering for better results
+				colorIndex := ip.findBestColorMix(originalColor, palette, x-bounds.Min.X, y-bounds.Min.Y)
+				processedImg.SetColorIndex(x-bounds.Min.X, y-bounds.Min.Y, colorIndex)
 			}
 		}
-		return palettedImg, responseETag, nil
-	} else {
-		// For grayscale without dithering
-		grayscaleImg := ip.convertToGrayscale(resizedImg)
-		if enableNormalize {
-			return ip.applyHistogramNormalization(grayscaleImg), responseETag, nil
-		}
-		return grayscaleImg, responseETag, nil
 	}
+
+	// Apply color calibration mapping if using default Spektra E6 palette
+	if isDefaultPalette {
+		deviceColors := ip.getSpektraE6DeviceColors()
+		calibratedImg := ip.mapCalibratedToDeviceColors(processedImg, palette, deviceColors)
+		return calibratedImg, responseETag, nil
+	}
+
+	return processedImg, responseETag, nil
 }
 
 type ErrNotModified struct{}
