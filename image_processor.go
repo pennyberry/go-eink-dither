@@ -7,7 +7,6 @@ import (
 	"image/color"
 	"image/jpeg"
 	"io"
-	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -296,157 +295,11 @@ func (ip *ImageProcessor) convertToGrayscale(img image.Image) *image.Gray {
 	return grayImg
 }
 
-func (ip *ImageProcessor) applyHistogramNormalization(img *image.Gray) *image.Gray {
-	bounds := img.Bounds()
 
-	histogram := make([]int, 256)
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			gray := img.GrayAt(x, y)
-			histogram[gray.Y]++
-		}
-	}
 
-	minVal := 255
-	maxVal := 0
-	for i := range 256 {
-		if histogram[i] > 0 {
-			if i < minVal {
-				minVal = i
-			}
-			if i > maxVal {
-				maxVal = i
-			}
-		}
-	}
 
-	if minVal == 0 && maxVal == 255 {
-		return img
-	}
 
-	normalizedImg := image.NewGray(bounds)
-
-	range_ := float64(maxVal - minVal)
-	if range_ == 0 {
-		return img
-	}
-
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			gray := img.GrayAt(x, y)
-
-			normalizedValue := uint8((float64(gray.Y-uint8(minVal)) / range_) * 255.0)
-			normalizedImg.SetGray(x, y, color.Gray{Y: normalizedValue})
-		}
-	}
-
-	return normalizedImg
-}
-
-// Enhanced contrast using histogram equalization - much more effective than simple normalization
-func (ip *ImageProcessor) applyRGBHistogramNormalization(img image.Image) *image.RGBA {
-	return ip.applyHistogramEqualization(img)
-}
-
-// Histogram equalization - redistributes pixel intensities for better contrast
-func (ip *ImageProcessor) applyHistogramEqualization(img image.Image) *image.RGBA {
-	bounds := img.Bounds()
-	width := bounds.Dx()
-	height := bounds.Dy()
-	totalPixels := width * height
-
-	// Create luminance histogram using perceptual weights
-	histogram := make([]int, 256)
-	luminanceMap := make([]uint8, width*height)
-
-	idx := 0
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			r, g, b, _ := img.At(x, y).RGBA()
-			r8 := uint8(r >> 8)
-			g8 := uint8(g >> 8)
-			b8 := uint8(b >> 8)
-
-			// Calculate perceptual luminance
-			luminance := uint8(0.299*float64(r8) + 0.587*float64(g8) + 0.114*float64(b8))
-			luminanceMap[idx] = luminance
-			histogram[luminance]++
-			idx++
-		}
-	}
-
-	// Create cumulative distribution function (CDF)
-	cdf := make([]float64, 256)
-	cdf[0] = float64(histogram[0])
-	for i := 1; i < 256; i++ {
-		cdf[i] = cdf[i-1] + float64(histogram[i])
-	}
-
-	// Normalize CDF and create lookup table
-	cdfMin := cdf[0]
-	for i := 0; i < 256 && cdf[i] == 0; i++ {
-		cdfMin = cdf[i]
-	}
-
-	lookupTable := make([]uint8, 256)
-	for i := range 256 {
-		if totalPixels > 1 {
-			normalized := (cdf[i] - cdfMin) / (float64(totalPixels) - cdfMin)
-			lookupTable[i] = uint8(normalized * 255.0)
-		} else {
-			lookupTable[i] = uint8(i)
-		}
-	}
-
-	// Apply equalization with enhanced contrast
-	enhancedImg := image.NewRGBA(bounds)
-	idx = 0
-
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			r, g, b, a := img.At(x, y).RGBA()
-			r8 := uint8(r >> 8)
-			g8 := uint8(g >> 8)
-			b8 := uint8(b >> 8)
-			a8 := uint8(a >> 8)
-
-			originalLum := luminanceMap[idx]
-			enhancedLum := lookupTable[originalLum]
-
-			// Apply enhancement while preserving color relationships
-			if originalLum > 0 {
-				factor := float64(enhancedLum) / float64(originalLum)
-
-				// Apply gamma correction for better perceptual contrast
-				factor = math.Pow(factor, 1.2) // Slight gamma boost
-
-				newR := uint8(ip.clamp(float64(r8)*factor, 0, 255))
-				newG := uint8(ip.clamp(float64(g8)*factor, 0, 255))
-				newB := uint8(ip.clamp(float64(b8)*factor, 0, 255))
-
-				enhancedImg.Set(x, y, color.RGBA{newR, newG, newB, a8})
-			} else {
-				enhancedImg.Set(x, y, color.RGBA{r8, g8, b8, a8})
-			}
-			idx++
-		}
-	}
-
-	return enhancedImg
-}
-
-// Utility function to clamp values
-func (ip *ImageProcessor) clamp(value, min, max float64) float64 {
-	if value < min {
-		return min
-	}
-	if value > max {
-		return max
-	}
-	return value
-}
-
-func (ip *ImageProcessor) ProcessImage(imageURL string, maxWidth, maxHeight uint, enableDither bool, enableNormalize bool, colorsStr string, etag string) (image.Image, string, error) {
+func (ip *ImageProcessor) ProcessImage(imageURL string, maxWidth, maxHeight uint, enableDither bool, colorsStr string, etag string) (image.Image, string, error) {
 	// Download the image
 	img, responseETag, err := ip.downloadImage(imageURL, etag)
 	if err != nil {
@@ -469,20 +322,12 @@ func (ip *ImageProcessor) ProcessImage(imageURL string, maxWidth, maxHeight uint
 	if enableDither {
 		var ditheredImg *image.Paletted
 		if isCustomColors {
-			// For custom colors, work with the original RGB image and optionally normalize
-			var processedImg image.Image = resizedImg
-			if enableNormalize {
-				processedImg = ip.applyRGBHistogramNormalization(resizedImg)
-			}
-			ditheredImg, err = ip.ApplyColorDithering(processedImg, palette)
+			// For custom colors, work with the original RGB image
+			ditheredImg, err = ip.ApplyColorDithering(resizedImg, palette)
 		} else {
-			// For grayscale, convert to grayscale first and optionally normalize
+			// For grayscale, convert to grayscale first
 			grayscaleImg := ip.convertToGrayscale(resizedImg)
-			var processedImg image.Image = grayscaleImg
-			if enableNormalize {
-				processedImg = ip.applyHistogramNormalization(grayscaleImg)
-			}
-			ditheredImg, err = ip.ApplyDithering(processedImg, palette)
+			ditheredImg, err = ip.ApplyDithering(grayscaleImg, palette)
 		}
 		if err != nil {
 			return nil, "", fmt.Errorf("failed to apply dithering: %w", err)
@@ -494,16 +339,11 @@ func (ip *ImageProcessor) ProcessImage(imageURL string, maxWidth, maxHeight uint
 	if isCustomColors {
 		// For custom colors without dithering, we still need to reduce to the palette colors
 		// but without dithering (simple nearest color matching)
-		var processedImg image.Image = resizedImg
-		if enableNormalize {
-			processedImg = ip.applyRGBHistogramNormalization(resizedImg)
-		}
-
-		bounds := processedImg.Bounds()
+		bounds := resizedImg.Bounds()
 		palettedImg := image.NewPaletted(bounds, palette)
 		for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 			for x := bounds.Min.X; x < bounds.Max.X; x++ {
-				originalColor := processedImg.At(x, y)
+				originalColor := resizedImg.At(x, y)
 				colorIndex := ip.findClosestColorIndexWeighted(originalColor, palette)
 				palettedImg.SetColorIndex(x-bounds.Min.X, y-bounds.Min.Y, colorIndex)
 			}
@@ -512,9 +352,6 @@ func (ip *ImageProcessor) ProcessImage(imageURL string, maxWidth, maxHeight uint
 	} else {
 		// For grayscale without dithering
 		grayscaleImg := ip.convertToGrayscale(resizedImg)
-		if enableNormalize {
-			return ip.applyHistogramNormalization(grayscaleImg), responseETag, nil
-		}
 		return grayscaleImg, responseETag, nil
 	}
 }

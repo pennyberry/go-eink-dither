@@ -41,7 +41,6 @@ func runServer(cmd *cobra.Command, args []string) {
 		widthStr := r.URL.Query().Get("width")
 		heightStr := r.URL.Query().Get("height")
 		ditherStr := r.URL.Query().Get("dither")
-		normalizeStr := r.URL.Query().Get("normalize")
 		colorsStr := r.URL.Query().Get("colors")
 
 		etag := r.Header.Get("If-None-Match")
@@ -79,21 +78,13 @@ func runServer(cmd *cobra.Command, args []string) {
 			}
 		}
 
-		enableNormalize := true
-		if normalizeStr != "" {
-			enableNormalize, err = strconv.ParseBool(normalizeStr)
-			if err != nil {
-				http.Error(w, "Invalid normalize parameter: must be true or false", http.StatusBadRequest)
-				return
-			}
-		}
 
 		if width == 0 || height == 0 {
 			http.Error(w, "Width and height must be greater than 0", http.StatusBadRequest)
 			return
 		}
 
-		processedImage, responseETag, err := processor.ProcessImage(imageURL, uint(width), uint(height), enableDither, enableNormalize, colorsStr, etag)
+		processedImage, responseETag, err := processor.ProcessImage(imageURL, uint(width), uint(height), enableDither, colorsStr, etag)
 		if err != nil {
 			var notModifiedErr ErrNotModified
 			if errors.As(err, &notModifiedErr) {
