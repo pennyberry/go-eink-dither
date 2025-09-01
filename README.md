@@ -49,7 +49,7 @@ http://localhost:8080/process?url=https://picsum.photos/500/500&width=400&height
 Spectra E6 color palette:
 
 ```
-https://dither.shvn.dev/process?url=https://blog.shvn.dev/posts/2025-welcome/images/lighthouse_hu_2abee84ca1903cbc.jpg&width=800&height=480&dither=true&colors=000000,ffffff,e6e600,cc0000,0033cc,00cc00
+http://locahost:8080/process?url=https://blog.shvn.dev/posts/2025-welcome/images/lighthouse_hu_2abee84ca1903cbc.jpg&width=800&height=480&dither=true&colors=000000,ffffff,e6e600,cc0000,0033cc,00cc00
 ```
 
 Without dithering:
@@ -74,4 +74,3 @@ Returns a BMP image using either:
 - **Custom**: Your specified hex colors via the `colors` parameter
 
 Images maintain aspect ratio and use indexed colors optimized for e-ink displays.
-
