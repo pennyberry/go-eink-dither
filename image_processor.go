@@ -501,12 +501,12 @@ func (ip *ImageProcessor) resizeImage(img image.Image, maxWidth, maxHeight uint)
 	originalWidth := uint(bounds.Dx())
 	originalHeight := uint(bounds.Dy())
 
-	// Rotate portrait images clockwise before fitting them to the display.
+	// Rotate portrait images counter clockwise before fitting them to the display.
 	if originalHeight > originalWidth {
 		rotated := image.NewRGBA(image.Rect(0, 0, int(originalHeight), int(originalWidth)))
 		for y := 0; y < int(originalHeight); y++ {
 			for x := 0; x < int(originalWidth); x++ {
-				rotated.Set(int(originalHeight)-1-y, x, img.At(bounds.Min.X+x, bounds.Min.Y+y))
+				rotated.Set(y, int(originalWidth)-1-x, img.At(bounds.Min.X+x, bounds.Min.Y+y))
 			}
 		}
 		img = rotated
