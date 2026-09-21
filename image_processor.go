@@ -400,10 +400,7 @@ func (ip *ImageProcessor) downloadImage(imageURL string, etag string) (image.Ima
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to decode JPEG image: %w", err)
 	}
-	orientation, err := readEXIFOrientation(body)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to read EXIF orientation: %w", err)
-	}
+	orientation := readEXIFOrientation(body)
 	img = applyEXIFOrientation(img, orientation)
 
 	return img, responseETag, nil
