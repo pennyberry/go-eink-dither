@@ -83,11 +83,6 @@ func runServer(cmd *cobra.Command, args []string) {
 			http.Error(w, "Width and height must be greater than 0", http.StatusBadRequest)
 			return
 		}
-		if width < height {
-			// flip width and height to maintain aspect ratio for e-ink displays
-			width, height = height, width
-			log.Printf("Flipping width and height to maintain aspect ratio: new width=%d, new height=%d", width, height)
-		}
 
 		processedImage, responseETag, err := processor.ProcessImage(imageURL, uint(width), uint(height), enableDither, colorsStr, etag)
 		if err != nil {

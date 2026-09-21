@@ -504,7 +504,10 @@ func (ip *ImageProcessor) resizeImage(img image.Image, maxWidth, maxHeight uint)
 	scaleX := float64(maxWidth) / float64(originalWidth)
 	scaleY := float64(maxHeight) / float64(originalHeight)
 
-	scale := max(scaleY, scaleX)
+	// Use the smaller scale so the image keeps its aspect ratio and fits
+	// within the requested dimensions, regardless of whether it is landscape
+	// or portrait.
+	scale := min(scaleY, scaleX)
 
 	scaledWidth := float64(originalWidth) * scale
 	scaledHeight := float64(originalHeight) * scale
